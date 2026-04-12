@@ -49,15 +49,17 @@ Once the container is running:
 
 5. Provide the details for your setup:
 
-   * **Tuneshine Host / IP:** Enter your Tuneshine's local IP (e.g. `192.168.1.50`).
-
-   * **Zone to Monitor:** Select your primary listening zone from the dropdown.
-
-   * **New Album Blur Steps:** Controls the length/drama of the focus-pull transition when a completely new album is played.
-
-   * **Intra-Album Blur Steps:** Controls the quick "mini-blur" cue when skipping tracks on the same album.
-
-   * **Hardware Dissolve Delay:** The delay (in ms) given to the ESP32 chip to render its dissolve. *(Keep above 1000ms to prevent buffer exhaustion).*
+| Setting Name | Description | Range | Default |
+| :--- | :--- | :--- | :--- |
+| **Tuneshine Host / IP** | The local network IP address or hostname of your Tuneshine hardware. | N/A | None |
+| **Zone to Monitor** | The specific Roon playback zone the extension will track and display. | List of Zones | None |
+| **New Album Blur Steps (0-5)** | The number of intermediate blur frames generated when a new album starts. | 0 — 5 | 2 |
+| **Intra-Album Blur Steps (0-5)** | The number of quick blur frames generated when skipping tracks within the same album. | 0 — 5 | 1 |
+| **Hardware Dissolve Delay (750-5000ms)** | The amount of time (in ms) allowed for the ESP32 to perform each hardware crossfade. | 750 — 5000 | 2000 |
+| **Clock Timeout (5-3600s)** | How long the "Paused" art stays on screen before transitioning to the floating Clock. | 5 — 3600 | 60 |
+| **Deep Idle Timeout (1-1440m)** | How long the Clock stays active before the screen turns pure black to save LED life. | 1 — 1440 | 10 |
+| **Active Brightness (1-100)** | The hardware brightness level used during active music playback. | 1 — 100 | 80 |
+| **Idle Brightness (1-100)** | The hardware brightness level used for the Clock and Deep Idle screens. | 1 — 100 | 20 |
 
 Click **Save**. The moment music begins playing in your selected zone, your Tuneshine will awaken and sync to the track!
 
