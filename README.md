@@ -1,8 +1,8 @@
 # Tuneshine Roon Extension
 
-A hyper-optimized, hardware-accelerated Roon integration for the [Tuneshine](https://www.tuneshine.rocks/) LED matrix display.
+An unofficial Roon Extension for the [Tuneshine](https://www.tuneshine.rocks/) LED matrix display.
 
-This extension syncs your Roon Server's album artwork and metadata directly to your local Tuneshine device over the network. It features a custom **Reactive Dissolve Engine** that pushes the ESP32 hardware to its limits to create gorgeous cinematic blur transitions between tracks without crashing the display.
+This extension syncs your Roon Server's album artwork and metadata directly to your local Tuneshine device over the network. It features a custom **Reactive Dissolve Engine** that pushes the ESP32 hardware to its limits to create cinematic blur transitions between tracks without crashing the display (which happened a lot during development 😄 )
 
 ## Features
 
@@ -17,6 +17,8 @@ This extension syncs your Roon Server's album artwork and metadata directly to y
 * **Event-Driven Daisy Chain:** Implements a custom HTTP proxy sequencer that waits for the ESP32 microcontroller to acknowledge file downloads, resulting in 100% crash-free transitions.
 
 ## Installation (Docker)
+
+Docker Image is hosted here - https://hub.docker.com/r/colseverinus/tuneshine-roon
 
 Because Roon relies on UDP broadcasts to discover extensions on the network, the Docker container **must** run using host networking (`network_mode: "host"`).
 
