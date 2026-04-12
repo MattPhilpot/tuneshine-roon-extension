@@ -1,0 +1,18 @@
+{
+  "name": "roon-extension-tuneshine",
+  "version": "1.0.0",
+  "description": "Roon Extension to display album artwork on a Tuneshine device.",
+  "main": "app.js",
+  "scripts": {
+    "start": "node app.js"
+  },
+  "dependencies": {
+    "node-roon-api": "github:roonlabs/node-roon-api",
+    "node-roon-api-image": "github:roonlabs/node-roon-api-image",
+    "node-roon-api-settings": "github:roonlabs/node-roon-api-settings",
+    "node-roon-api-status": "github:roonlabs/node-roon-api-status",
+    "node-roon-api-transport": "github:roonlabs/node-roon-api-transport",
+    "jimp": "0.22.12",
+    "node-vibrant": "^3.1.6"
+  }
+}
