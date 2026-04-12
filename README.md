@@ -51,4 +51,3 @@ Click **Save**. The moment music begins playing in your selected zone, your Tune
 The ESP32 microcontroller inside the Tuneshine has extreme RAM limitations. Attempting to send high-framerate animated WebP or GIF files to the display causes a heap exhaustion crash (`HTTP_FAIL_ERROR`).
 
 To bypass this, this extension acts as a smart micro-server. When a track changes, Node.js instantly pre-renders a sequence of static PNGs with varying blur radiuses (the "Stepladder"). It serves the first frame to the Tuneshine, monitors the HTTP network pipe to confirm exactly when the hardware finishes downloading it, and then waits for the hardware's native crossfade to finish before serving the next frame. The result is a perfect, cinematic focus-pull that uses zero video memory.
-```
