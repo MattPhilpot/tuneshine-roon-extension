@@ -6,9 +6,9 @@ This extension syncs your Roon Server's album artwork and metadata directly to y
 
 ## Features
 
-* **Real-Time Sync:** Utilizes Roon's WebSocket API for instantaneous reaction to play, pause, and skip events.
+* **Real-Time Sync:** Utilizes Roon's WebSocket API to react to play, pause, and skip events.
 
-* **Cinematic Focus-Pull Transitions:** Dynamically generates mathematical Gaussian blur frames and utilizes the Tuneshine's native hardware crossfading to create butter-smooth track transitions.
+* **Cinematic Focus-Pull Transitions:** Generates mathematical Gaussian blur frames and utilizes the Tuneshine's native hardware crossfading to create smooth track transitions.
 
 * **Configurable UI:** Adjust brightness, timeouts, and animation speeds natively inside the Roon Remote application.
 
@@ -19,6 +19,19 @@ This extension syncs your Roon Server's album artwork and metadata directly to y
 ## Installation (Docker)
 
 Because Roon relies on UDP broadcasts to discover extensions on the network, the Docker container **must** run using host networking (`network_mode: "host"`).
+
+### Environment Variables
+
+You can customize the extension behavior by passing the following environment variables to the Docker container:
+
+| Variable | Description | Default | Required |
+| :--- | :--- | :--- | :--- |
+| `PORT` | The port the internal HTTP proxy server listens on. | `8090` | No |
+| `TZ` | Timezone for the clock display (e.g., `America/New_York`). | `UTC` | No |
+| `CLOCK_FORMAT` | Set to `12` or `24` for the clock display format. | `12` | No |
+| `HOST_IP` | Manually specify the LAN IP of the Docker host if auto-detection fails. | *Auto-detected* | No |
+| `TUNESHINE_HOST` | The IP address of your Tuneshine (can also be configured via Roon UI). | `""` | No |
+
 
 ## Configuration
 
@@ -50,4 +63,4 @@ Click **Save**. The moment music begins playing in your selected zone, your Tune
 
 The ESP32 microcontroller inside the Tuneshine has extreme RAM limitations. Attempting to send high-framerate animated WebP or GIF files to the display causes a heap exhaustion crash (`HTTP_FAIL_ERROR`).
 
-To bypass this, this extension acts as a smart micro-server. When a track changes, Node.js instantly pre-renders a sequence of static PNGs with varying blur radiuses (the "Stepladder"). It serves the first frame to the Tuneshine, monitors the HTTP network pipe to confirm exactly when the hardware finishes downloading it, and then waits for the hardware's native crossfade to finish before serving the next frame. The result is a perfect, cinematic focus-pull that uses zero video memory.
+To bypass this, this extension acts as a smart micro-server. When a track changes, Node.js instantly pre-renders a sequence of static PNGs with varying blur radiuses (the "Stepladder"). It serves the first frame to the Tuneshine, monitors the HTTP network pipe to confirm exactly when the hardware finishes downloading it, and then waits for the hardware's native crossfade to finish before serving the next frame. The result is a cinematic-like focus-pull that uses zero video memory.
