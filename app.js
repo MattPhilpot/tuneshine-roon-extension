@@ -80,8 +80,7 @@ let activeTransitionId = null;
 let activeTransitionState = null; 
 
 /**
- * Cancels all pending animation timers and resets transition state.
- * Used when a track is skipped or paused mid-animation.
+ * Halts any active frame transitions and clears timers.
  */
 function clearTransitions() {
     transitionTimers.forEach(t => clearTimeout(t));
@@ -90,11 +89,7 @@ function clearTransitions() {
     activeTransitionState = null;
 }
 
-// --- Setup Micro HTTP Server ---
-/**
- * Main HTTP Proxy Server.
- * Serves processed album art, transition frames, and dynamic UI elements (Clock/Pause) to the Tuneshine.
- */
+// --- HTTP SERVER ---
 const server = http.createServer((req, res) => {
     const parsedUrl = new URL(req.url, `http://${req.headers.host}`);
     const pathname = parsedUrl.pathname;
@@ -145,7 +140,7 @@ const server = http.createServer((req, res) => {
                 res.end(imgBuffer);
             });
         } else {
-            res.writeHead(400); res.end('Missing key');
+            res.writeHead(404); res.end('Not found');
         }
     } else {
         res.writeHead(404); res.end('Not found');
@@ -155,10 +150,8 @@ const server = http.createServer((req, res) => {
 server.listen(proxyPort, () => log(`[Server] Tuneshine Proxy running on port ${proxyPort}`));
 
 /**
- * The Reactive Daisy-Chain Advancer.
- * Confirms that the Tuneshine hardware has finished fetching the current frame 
- * before authorizing the next POST request in the animation sequence.
- * @param {string} fetchedPathname - The URL just requested by the hardware.
+ * Daisy-chain sequencer that waits for the hardware to finish fetching a frame
+ * before pushing the next stage of the focus-pull transition.
  */
 function checkTransitionAdvance(fetchedPathname) {
     if (displayState !== 'PLAYING' || !activeTransitionState) return;
@@ -190,11 +183,11 @@ function checkTransitionAdvance(fetchedPathname) {
     }
 }
 
-// --- Roon API Setup ---
+// --- ROON SETUP ---
 var roon = new RoonApi({
     extension_id: 'com.colseverinus.tuneshine.roon',
     display_name: 'Tuneshine Display Controller',
-    display_version: 'v0.32',
+    display_version: 'v0.37',
     publisher: 'Matt Philpot',
     email: 'col.severinus@gmail.com',
     website: 'https://everydayaudiophile.com',
@@ -215,10 +208,7 @@ var roon = new RoonApi({
             }
         });
     },
-    core_unpaired: function(core_) { 
-        core = null; 
-        log("[Roon] Unpaired from Roon Core");
-    }
+    core_unpaired: function(core_) { core = null; log("[Roon] Unpaired from Roon Core"); }
 });
 
 let loadedSettings = roon.load_config("settings") || {};
@@ -230,17 +220,12 @@ var mysettings = {
     dissolve_delay: loadedSettings.dissolve_delay || 2000,
     active_brightness: loadedSettings.active_brightness || 80,
     idle_brightness: loadedSettings.idle_brightness || 20,
-    clock_timeout: loadedSettings.clock_timeout || loadedSettings.idle_timeout || 60, 
+    clock_timeout: loadedSettings.clock_timeout || 60, 
     deep_idle_timeout: loadedSettings.deep_idle_timeout || 10 
 };
 
 var svc_status = new RoonApiStatus(roon);
 
-/**
- * Generates the dynamic settings layout for the Roon Remote application.
- * @param {Object} settings - The current extension settings.
- * @returns {Object} Roon API Layout object.
- */
 function makeLayout(settings) {
     let zone_dropdown = [{ title: "Select Zone...", value: null }];
     Object.values(zones).forEach(z => zone_dropdown.push({ title: z.display_name, value: z.zone_id }));
@@ -282,10 +267,9 @@ roon.init_services({ required_services: [ RoonApiTransport, RoonApiImage ], prov
 roon.start_discovery();
 
 /**
- * Intelligent Image Normalization Engine v5 (Inverse-Energy Gamma Correction).
- * Drives image enhancement using a 1/x progression curve. Low-energy (muddy) art 
- * receives aggressive non-linear Gamma lifting and saturation, while high-energy 
- * art (like Oranj) triggers a bypass factor of ~1.0 for perfect original preservation.
+ * Intelligent Image Normalization v7.2 (Reverted Protection, Softened Proportional Boost).
+ * Uses a refined 1/x progression to apply subtle Contrast (max 15%) and Saturation (max 10%)
+ * to low-energy art. Uses a softened 0.4 black crush to clean mud without artificial glow.
  * @param {Jimp} jimpImage - The raw 64x64 Jimp object from Roon.
  * @returns {Jimp} The normalized Jimp object.
  */
@@ -294,18 +278,16 @@ async function normalizeImageForLED(jimpImage) {
     let totalSat = 0;
     const pixelCount = jimpImage.bitmap.width * jimpImage.bitmap.height;
 
-    // Pass 1: Gather Histogram and Saturation metrics
+    // Pass 1: Metric analysis
     jimpImage.scan(0, 0, jimpImage.bitmap.width, jimpImage.bitmap.height, function(x, y, idx) {
-        const r = this.bitmap.data[idx + 0];
-        const g = this.bitmap.data[idx + 1];
-        const b = this.bitmap.data[idx + 2];
+        const r = this.bitmap.data[idx + 0], g = this.bitmap.data[idx + 1], b = this.bitmap.data[idx + 2];
         const lum = Math.round(0.2126 * r + 0.7152 * g + 0.0722 * b);
         histogram[lum]++;
         const avg = (r + g + b) / 3;
         totalSat += Math.sqrt(((r - avg) ** 2 + (g - avg) ** 2 + (b - avg) ** 2) / 3);
     });
 
-    // Pass 2: Find Percentiles to find the "Effective" Range
+    // Pass 2: Identify 1%/99% dynamic range
     let minLum = 0, maxLum = 255, count = 0;
     const threshold = pixelCount * 0.01;
     for (let i = 0; i < 256; i++) { count += histogram[i]; if (count >= threshold) { minLum = i; break; } }
@@ -313,61 +295,50 @@ async function normalizeImageForLED(jimpImage) {
     for (let i = 255; i >= 0; i--) { count += histogram[i]; if (count >= threshold) { maxLum = i; break; } }
 
     const avgSat = totalSat / pixelCount;
+    
+    // Calculate Energy Factor (E).
     const eLum = (maxLum - minLum) / 255;
-    const eSat = Math.min(1, avgSat / 40); // 40 is our "Maximum Energy" saturation ceiling
-    
-    // Total Energy Coordinate (Weighted 40/60 toward color vibrancy)
-    const energy = (eLum * 0.4) + (eSat * 0.6);
-    
-    // The 1/x Progressive Aggression Factor (The Sovereign Architect's Curve)
-    // As Energy approaches 1, Aggression approaches 1 (Transparent).
-    // As Energy approaches 0, Aggression increases exponentially.
-    const aggression = 1 + Math.pow((1 / Math.max(0.08, energy)) - 1, 0.6);
-    const gamma = 1 / aggression;
+    const eSat = Math.min(1, avgSat / 30);
+    const energy = (eLum * 0.5) + (eSat * 0.5);
 
-    log(`[Normalization] E:${energy.toFixed(2)} -> Aggression:${aggression.toFixed(2)} (Gamma:${gamma.toFixed(2)})`);
+    // Intervention Strength based on refined 1/x curve.
+    const aggression = (1 / Math.max(0.1, energy)) - 1;
+    const strength = Math.min(1, Math.pow(Math.max(0, aggression), 0.7));
 
-    // Only intervene if the signal is noticeably weak (Aggression > 1.05)
-    if (aggression > 1.05) {
+    log(`[Normalization] E:${energy.toFixed(2)} -> Strength:${strength.toFixed(2)} (Softened 0.4 Crush)`);
+
+    // Only apply if signal weakness warrants a boost
+    if (strength > 0.05) {
+        // Step 1: Softened Black Crush (0.4 coefficient)
+        // Reverted to uniform scaling to prevent "Oranj" artifacts.
+        const floorCrush = minLum * 0.4 * strength;
+        
         jimpImage.scan(0, 0, jimpImage.bitmap.width, jimpImage.bitmap.height, function(x, y, idx) {
-            const r = this.bitmap.data[idx + 0];
-            const g = this.bitmap.data[idx + 1];
-            const b = this.bitmap.data[idx + 2];
+            const r = this.bitmap.data[idx + 0], g = this.bitmap.data[idx + 1], b = this.bitmap.data[idx + 2];
             const lum = (0.2126 * r + 0.7152 * g + 0.0722 * b);
-
-            // Step 1: Anchor the Black Floor
-            const floor = Math.max(0, minLum - 1);
-            const crushedLum = Math.max(0, lum - floor);
             
-            // Step 2: Non-Linear Gamma Lift (Preserves highlights, lifts mid-tones)
-            const normalizedLum = crushedLum / Math.max(1, 255 - floor);
-            const liftedLum = Math.pow(normalizedLum, gamma) * 255;
+            const crushedLum = Math.max(0, lum - floorCrush);
+            const ratio = crushedLum / Math.max(1, lum);
 
-            // Step 3: Hue-Preserved Scaling Ratio
-            const ratio = liftedLum / Math.max(1, lum);
             this.bitmap.data[idx + 0] = Math.max(0, Math.min(255, r * ratio));
             this.bitmap.data[idx + 1] = Math.max(0, Math.min(255, g * ratio));
             this.bitmap.data[idx + 2] = Math.max(0, Math.min(255, b * ratio));
         });
 
-        // Step 4: Damped Saturation Normalization
-        if (avgSat < 25) {
-            const satBoost = (aggression - 1) * 8; 
-            log(`[Normalization] Applying adaptive vibrancy: +${satBoost.toFixed(0)}%`);
-            jimpImage.color([{ apply: 'saturate', params: [satBoost] }]);
-        }
-        
-        jimpImage.contrast(0.05); // Final clarity nudge
+        // Step 2: Proportional Contrast (Max 15%)
+        jimpImage.contrast(0.15 * strength);
+
+        // Step 3: Proportional Saturation (Max 10%)
+        jimpImage.color([{ apply: 'saturate', params: [10 * strength] }]);
     } else {
-        log(`[Normalization] Art is maximum fidelity. Bypassing engine.`);
+        log(`[Normalization] Art is high fidelity. Bypassing engine.`);
     }
 
     return jimpImage;
 }
 
 /**
- * Evaluates the current state of the selected Roon zone.
- * Triggers playback logic, transitions, and idle timers.
+ * State Machine. Evaluates zone playback status and triggers display updates.
  * @param {Array} changedZones - Array of zone data updated by the Roon API.
  */
 function checkZone(changedZones) {
@@ -392,7 +363,7 @@ function checkZone(changedZones) {
             const imageKey = np.image_key;
             if (imageKey) {
                 if (imageKey !== lastImageKey) {
-                    log(`[Action] New album detected. Triggering Full Stepladder.`);
+                    log(`[Action] New album detected. Triggering focus-pull.`);
                     clearTransitions();
                     activeTransitionId = Date.now();
                     lastImageKey = imageKey;
@@ -406,7 +377,7 @@ function checkZone(changedZones) {
                     pushStaticImageToTuneshine(track, imageKey);
                 } 
                 else if (track !== currentTrackName) {
-                    log(`[Action] Track changed on same album. Triggering Mini-Blur.`);
+                    log(`[Action] Track change on same album.`);
                     clearTransitions();
                     activeTransitionId = Date.now();
                     svc_status.set_status(`Playing: ${track}`, false);
@@ -429,8 +400,7 @@ function checkZone(changedZones) {
 }
 
 /**
- * The Stepladder Animation Engine.
- * Pre-renders blur frames, caches them to disk, and queues the daisy-chain sequencer.
+ * Pre-renders blur stages and dispatches the reactive sequence.
  * @param {string} track - Current track name.
  * @param {string} imageKey - Roon Image identifier.
  * @param {number} transitionId - Unique ID to prevent skip-collision.
@@ -438,8 +408,7 @@ function checkZone(changedZones) {
  */
 async function runStepladderTransition(track, imageKey, transitionId, isNewAlbum) {
     if (!core) return;
-    const host = mysettings.tuneshine_host;
-    if (!host) return;
+    const host = mysettings.tuneshine_host; if (!host) return;
     const localIp = getLocalIp();
 
     core.services.RoonApiImage.get_image(imageKey, { scale: 'fill', width: 64, height: 64, format: 'image/png' }, async (err, contentType, imgBuffer) => {
@@ -453,7 +422,7 @@ async function runStepladderTransition(track, imageKey, transitionId, isNewAlbum
             lastImgBuffer = imgBuffer; 
             let sharpJimp = await Jimp.read(imgBuffer);
             
-            // Apply Sovereign Normalization before generating blur sequence
+            // Normalize before blur generation
             sharpJimp = await normalizeImageForLED(sharpJimp);
             
             const sharpPath = path.join(configDir, `trans_0_${imageKey}.png`);
@@ -464,7 +433,7 @@ async function runStepladderTransition(track, imageKey, transitionId, isNewAlbum
             activeTransitionState = { id: transitionId, track: track, currentStageIndex: 0, stages: [] };
 
             if (steps === 0) {
-                activeTransitionState.stages.push({ url: `http://${localIp}:${proxyPort}/image/trans_0_${imageKey}.png?t=${Date.now()}`, delayAfterFetch: 0, name: "Direct Sharp Image" });
+                activeTransitionState.stages.push({ url: `http://${localIp}:${proxyPort}/image/trans_0_${imageKey}.png?t=${Date.now()}`, delayAfterFetch: 0, name: "Sharp Image" });
             } else {
                 const blurValues = [];
                 for (let i = steps; i >= 1; i--) blurValues.push(Math.ceil(maxBlur * (i / steps)));
@@ -477,12 +446,11 @@ async function runStepladderTransition(track, imageKey, transitionId, isNewAlbum
                 await Promise.all(blurPromises);
 
                 blurValues.forEach((b, index) => {
-                    activeTransitionState.stages.push({ url: `http://${localIp}:${proxyPort}/image/trans_${b}_${imageKey}.png?t=${Date.now()}`, delayAfterFetch: delay, name: `Blur Step ${index + 1}/${steps}` });
+                    activeTransitionState.stages.push({ url: `http://${localIp}:${proxyPort}/image/trans_${b}_${imageKey}.png?t=${Date.now()}`, delayAfterFetch: delay, name: `Blur Step ${index + 1}` });
                 });
-                activeTransitionState.stages.push({ url: `http://${localIp}:${proxyPort}/image/trans_0_${imageKey}.png?t=${Date.now()}`, delayAfterFetch: 0, name: `Final Sharp Image` });
+                activeTransitionState.stages.push({ url: `http://${localIp}:${proxyPort}/image/trans_0_${imageKey}.png?t=${Date.now()}`, delayAfterFetch: 0, name: `Final Sharp` });
             }
 
-            // Schedule background cleanup of disk cache
             const cleanupTimer = setTimeout(() => {
                 pathsToCleanup.forEach(p => { try { if (fs.existsSync(p)) fs.unlinkSync(p); } catch(e) {} });
             }, 15000);
@@ -490,7 +458,6 @@ async function runStepladderTransition(track, imageKey, transitionId, isNewAlbum
 
             if (displayState === 'PLAYING' && activeTransitionId === transitionId) {
                 const firstStage = activeTransitionState.stages[0];
-                log(`[API] Pushing ${firstStage.name}`);
                 await fetch(`http://${host}/image`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ trackName: track, idle: false, imageUrl: firstStage.url }) }).catch(()=>{});
             }
         } catch (e) { errLog(`[Transition Error] ${e}`); }
@@ -498,8 +465,9 @@ async function runStepladderTransition(track, imageKey, transitionId, isNewAlbum
 }
 
 /**
- * Pushes a static image URL to the Tuneshine without animation logic.
- * Used for resuming playback or restoring state.
+ * Pushes a static image URL to hardware.
+ * @param {string} track - Current track name.
+ * @param {string} imageKey - Roon Image identifier.
  */
 async function pushStaticImageToTuneshine(track, imageKey) {
     const host = mysettings.tuneshine_host; if (!host) return;
@@ -554,14 +522,14 @@ async function generateClockBuffer() {
     const timeOptions = { hour: is24Hour ? '2-digit' : 'numeric', minute: '2-digit', hour12: !is24Hour };
     if (process.env.TZ) timeOptions.timeZone = process.env.TZ;
     let parts = now.toLocaleTimeString('en-US', timeOptions).split(' ');
-    const timeStr = parts[0]; const amPmStr = parts[1] || "";
-    const timeWidth = Jimp.measureText(f16, timeStr); const timeHeight = Jimp.measureTextHeight(f16, timeStr, 64);
+    const timeStr = parts[0], amPmStr = parts[1] || "";
+    const timeWidth = Jimp.measureText(f16, timeStr), timeHeight = Jimp.measureTextHeight(f16, timeStr, 64);
     const randomX = Math.floor(Math.random() * Math.max(0, 64 - timeWidth));
     const randomY = Math.floor(Math.random() * Math.max(0, 64 - timeHeight));
     image.print(f16, randomX, randomY, timeStr);
     if (amPmStr) {
-        const p = 2; const amW = Jimp.measureText(f8, amPmStr); const amH = Jimp.measureTextHeight(f8, amPmStr, 64);
-        const tCX = randomX + (timeWidth / 2); const tCY = randomY + (timeHeight / 2);
+        const p = 2, amW = Jimp.measureText(f8, amPmStr), amH = Jimp.measureTextHeight(f8, amPmStr, 64);
+        const tCX = randomX + (timeWidth / 2), tCY = randomY + (timeHeight / 2);
         let cX, cY;
         if (tCX < 32 && tCY < 32) { cX = 64 - amW - p; cY = 64 - amH - p; }
         else if (tCX >= 32 && tCY < 32) { cX = p; cY = 64 - amH - p; }
