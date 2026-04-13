@@ -22,6 +22,35 @@ Docker Image is hosted here - https://hub.docker.com/r/colseverinus/tuneshine-ro
 
 Because Roon relies on UDP broadcasts to discover extensions on the network, the Docker container **must** run using host networking (`network_mode: "host"`).
 
+```
+services:
+  tuneshine-roon:
+    image: colseverinus/tuneshine-roon:latest
+    container_name: tuneshine-roon
+    network_mode: "host"
+    restart: unless-stopped
+    environment:
+      - TZ=America/Chicago
+      - CLOCK_FORMAT=12
+      - PORT=8090
+    volumes:
+      - ./tuneshine-config:/app/config
+```
+### Persistent Storage
+
+The extension stores its configuration, Roon pairing information, and temporary transition frames in the `/app/config` directory inside the container.
+
+**Why it's needed:**
+By mapping a host directory (e.g., `./tuneshine-config`) to `/app/config`, your settings become persistent. This includes:
+
+* Your Tuneshine IP address and selected Roon Zone.
+* Animation preferences (Blur steps, delays).
+* Image Normalization toggle state.
+* The unique pairing token that allows Roon to remember this extension.
+
+**Why it's optional:**
+If you do not define a volume, the extension will still function perfectly. However, the internal storage is "ephemeral." If the container is updated, restarted, or moved, all settings will revert to defaults, and you will need to re-enable the extension and re-enter your configuration within the Roon Settings menu.
+
 ### Environment Variables
 
 You can customize the extension behavior by passing the following environment variables to the Docker container:
