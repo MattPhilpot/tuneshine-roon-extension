@@ -1,7 +1,6 @@
 FROM node:18-alpine
 
-# Added ffmpeg for lightning-fast Animated WebP encoding
-RUN apk add --no-cache git tzdata ffmpeg
+RUN apk add --no-cache git tzdata
 
 WORKDIR /usr/src/app
 COPY package*.json ./
