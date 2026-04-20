@@ -2,27 +2,22 @@
 
 An unofficial Roon Extension for the [Tuneshine](https://www.tuneshine.rocks/) LED matrix display.
 
-This extension syncs your Roon Server's album artwork and metadata directly to your local Tuneshine device over the network. It features a custom **Reactive Dissolve Engine** that pushes the ESP32 hardware to its limits to create cinematic blur transitions between tracks without crashing the display (which happened a lot during development 😄 )
+Syncs album artwork, metadata, and playback state from Roon to your Tuneshine over the local network. Features a custom **Stepladder Transition Engine** that creates cinematic blur-to-focus transitions between tracks without crashing the ESP32's limited memory.
 
 ## Features
 
-* **Real-Time Sync:** Utilizes Roon's WebSocket API to react to play, pause, and skip events.
+- **Real-Time Playback Sync** — Reacts instantly to play, pause, stop, and skip events via Roon's zone subscription API.
+- **Cinematic Focus-Pull Transitions** — Pre-renders Gaussian blur frames at varying radiuses and combines them with the Tuneshine's native hardware dissolve for a theatrical rack-focus effect. New albums get a dramatic reveal; intra-album skips get a subtle acknowledgment.
+- **Sovereign Normalization Engine** — Analyzes each image's luminance and saturation to apply proportional contrast, saturation, and black-crush corrections optimized for low-resolution LED panels. Bypasses cleanly when disabled.
+- **Idle State Machine** — Paused artwork transitions to a floating clock (with burn-in jitter), then to a pure-black deep idle screen to preserve LED lifespan.
+- **Event-Driven Sequencer** — A reactive HTTP proxy monitors when the ESP32 finishes fetching each frame before dispatching the next, with per-stage watchdog timeouts for guaranteed recovery.
+- **Configurable via Roon** — All settings (brightness, blur steps, delays, timeouts, normalization) are managed natively inside the Roon Remote app.
 
-* **Cinematic Focus-Pull Transitions:** Generates mathematical Gaussian blur frames and utilizes the Tuneshine's native hardware crossfading to create smooth track transitions.
+## Docker Setup
 
-* **Configurable UI:** Adjust brightness, timeouts, and animation speeds natively inside the Roon Remote application.
+The container requires **host networking** for Roon's UDP discovery to find the extension.
 
-* **Deep Idle States:** Automatically dims to a beautiful floating Clock screen when paused, and eventually falls back to a pure black "Deep Idle" state to preserve LED hardware life.
-
-* **Event-Driven Daisy Chain:** Implements a custom HTTP proxy sequencer that waits for the ESP32 microcontroller to acknowledge file downloads, resulting in 100% crash-free transitions.
-
-## Installation (Docker)
-
-Docker Image is hosted here - https://hub.docker.com/r/colseverinus/tuneshine-roon
-
-Because Roon relies on UDP broadcasts to discover extensions on the network, the Docker container **must** run using host networking (`network_mode: "host"`).
-
-```
+```yaml
 services:
   tuneshine-roon:
     image: colseverinus/tuneshine-roon:latest
@@ -31,69 +26,59 @@ services:
     restart: unless-stopped
     environment:
       - TZ=America/Chicago
-      - CLOCK_FORMAT=12
       - PORT=8090
     volumes:
-      - ./tuneshine-config:/app/config
+      - ./tuneshine-config:/usr/src/app/config
 ```
-### Persistent Storage
 
-The extension stores its configuration, Roon pairing information, and temporary transition frames in the `/app/config` directory inside the container.
+### Volumes
 
-**Why it's needed:**
-By mapping a host directory (e.g., `./tuneshine-config`) to `/app/config`, your settings become persistent. This includes:
-
-* Your Tuneshine IP address and selected Roon Zone.
-* Animation preferences (Blur steps, delays).
-* Image Normalization toggle state.
-* The unique pairing token that allows Roon to remember this extension.
-
-**Why it's optional:**
-If you do not define a volume, the extension will still function perfectly. However, the internal storage is "ephemeral." If the container is updated, restarted, or moved, all settings will revert to defaults, and you will need to re-enable the extension and re-enter your configuration within the Roon Settings menu.
+Mapping a host directory to `/usr/src/app/config` persists your Roon pairing token, Tuneshine IP, zone selection, and all animation preferences across container updates. Without it, settings reset on every restart.
 
 ### Environment Variables
 
-You can customize the extension behavior by passing the following environment variables to the Docker container:
+| Variable | Description | Default |
+| :--- | :--- | :--- |
+| `TZ` | Timezone for the clock display (e.g. `America/New_York`). | `UTC` |
+| `PORT` | Port for the internal HTTP proxy that serves images to the Tuneshine. | `8090` |
+| `HOST_IP` | Override the auto-detected LAN IP of the Docker host. Only needed if auto-detection picks the wrong interface. | Auto-detected |
 
-| Variable | Description | Default | Required |
+## Roon Settings
+
+Once running, go to **Roon Remote > Settings > Extensions**, enable **Tuneshine Roon Controller**, and click **Settings**.
+
+| Setting | What it does | Range | Default |
 | :--- | :--- | :--- | :--- |
-| `PORT` | The port the internal HTTP proxy server listens on. | `8090` | No |
-| `TZ` | Timezone for the clock display (e.g., `America/New_York`). | `UTC` | No |
-| `CLOCK_FORMAT` | Set to `12` or `24` for the clock display format. | `12` | No |
-| `HOST_IP` | Manually specify the LAN IP of the Docker host if auto-detection fails. | *Auto-detected* | No |
-| `TUNESHINE_HOST` | The IP address of your Tuneshine (can also be configured via Roon UI). | `""` | No |
+| **Tuneshine Host / IP** | Local IP or hostname of your Tuneshine device. | — | — |
+| **Zone to Monitor** | Which Roon zone to track. | Dropdown | — |
+| **Enable Image Normalization** | Toggles the LED normalization engine (contrast, saturation, black crush). | On/Off | On |
+| **New Album Blur Steps** | Number of blur frames for cross-album transitions. 0 disables the blur entirely. | 0–5 | 2 |
+| **Intra-Album Blur Steps** | Number of blur frames for same-album track skips. | 0–5 | 1 |
+| **Hardware Dissolve Delay** | Time (ms) given to the ESP32 for its native crossfade between frames. Values below 1000ms may cause issues on slower networks. | 800–5000 | 1000 |
+| **Clock Timeout** | Seconds before paused artwork transitions to the floating clock. | 5–3600 | 60 |
+| **Deep Idle Timeout** | Minutes before the clock transitions to a pure-black screen. | 1–1440 | 10 |
+| **Active Brightness** | Display brightness during playback. | 1–100 | 80 |
+| **Idle Brightness** | Display brightness for clock and deep idle screens. | 1–100 | 20 |
 
+## How It Works
 
-## Configuration
+The ESP32 inside the Tuneshine can't handle animated images or rapid HTTP connections without heap exhaustion crashes. This extension solves that by acting as a pacing governor between Roon and the hardware.
 
-Once the container is running:
+When a track changes, the extension:
 
-1. Open your **Roon Remote** app on your phone, tablet, or PC.
+1. Fetches the artwork from Roon at 256x256 and applies LED normalization.
+2. Pre-renders a series of progressively less-blurred Baseline JPEGs to disk (the "Stepladder").
+3. Sends the first (most blurred) frame URL to the Tuneshine.
+4. Waits for the ESP32 to finish downloading it (confirmed via the HTTP proxy's response event).
+5. Pauses for 150ms (the "breather") to let the ESP32 clear its DMA buffer.
+6. Sends the next frame. Repeats until the sharp image is displayed.
 
-2. Go to **Settings > Extensions**.
+If the hardware stalls at any point, a per-stage watchdog forces the final sharp image through. If the user skips tracks mid-transition, all in-flight async work is instantly killed via checkpoint guards.
 
-3. You will see **Tuneshine Display Controller** listed. Click **Enable**.
+## Docker Hub
 
-4. Click **Settings** next to the extension.
+[colseverinus/tuneshine-roon](https://hub.docker.com/r/colseverinus/tuneshine-roon)
 
-5. Provide the details for your setup:
+## License
 
-| Setting Name | Description | Range | Default |
-| :--- | :--- | :--- | :--- |
-| **Tuneshine Host / IP** | The local network IP address or hostname of your Tuneshine hardware. | N/A | None |
-| **Zone to Monitor** | The specific Roon playback zone the extension will track and display. | List of Zones | None |
-| **New Album Blur Steps (0-5)** | The number of intermediate blur frames generated when a new album starts. 0 = Bypass | 0 — 5 | 2 |
-| **Intra-Album Blur Steps (0-5)** | The number of quick blur frames generated when skipping tracks within the same album. 0 = Bypass | 0 — 5 | 1 |
-| **Hardware Dissolve Delay (750-5000ms)** | The amount of time (in ms) allowed for the ESP32 to perform each hardware crossfade. **Warning:** Even though <1000 is allowed, it may cause issues if your network speed is slow | 750 — 5000 | 2000 |
-| **Clock Timeout (5-3600s)** | How long the "Paused" art stays on screen before transitioning to the floating Clock. | 5 — 3600 | 60 |
-| **Deep Idle Timeout (1-1440m)** | How long the Clock stays active before the screen turns pure black to save LED life. | 1 — 1440 | 10 |
-| **Active Brightness (1-100)** | The hardware brightness level used during active music playback. | 1 — 100 | 80 |
-| **Idle Brightness (1-100)** | The hardware brightness level used for the Clock and Deep Idle screens. | 1 — 100 | 20 |
-
-Click **Save**. The moment music begins playing in your selected zone, your Tuneshine will awaken and sync to the track!
-
-## Why is it built this way?
-
-The ESP32 microcontroller inside the Tuneshine has extreme RAM limitations. Attempting to send high-framerate animated WebP or GIF files to the display causes a heap exhaustion crash (`HTTP_FAIL_ERROR`).
-
-To bypass this, this extension acts as a smart micro-server. When a track changes, Node.js instantly pre-renders a sequence of static PNGs with varying blur radiuses (the "Stepladder"). It serves the first frame to the Tuneshine, monitors the HTTP network pipe to confirm exactly when the hardware finishes downloading it, and then waits for the hardware's native crossfade to finish before serving the next frame. The result is a cinematic-like focus-pull that uses zero video memory.
+Unofficial community project. Not affiliated with Tuneshine or Roon Labs.
